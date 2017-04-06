@@ -237,8 +237,9 @@ proc optmodel printlevel=0;
 	num xX{CanalSet};
 	num Y{CanalSet};
 	str classificacao{CanalSet};
-	read data WRSTEMP.BLE_ESTRUTURA_CD_&cd(where=(STATUS~='INDISPONÍVEL' AND ESTACAO=1 and area = "&area" and modulo="&modulo")) into CanalSet=[CANAL]
-		areaCanal=AREA modCanal=MODULO estacao classificacao xX=X Y; 
+	str xstatus{CanalSet};
+	read data WRSTEMP.BLE_ESTRUTURA_CD_&cd(where=(ESTACAO=1 and area = "&area" and modulo="&modulo")) into CanalSet=[CANAL]
+		areaCanal=AREA modCanal=MODULO estacao classificacao xX=X Y xstatus=status; 
 	/* Lê solução de alocação de área*/
 	set<num,num,str,str> ProdutoModSet;
 	num trocaModulo{ProdutoModSet};
@@ -252,9 +253,15 @@ proc optmodel printlevel=0;
 	set<str> CanSet;
 	CanSet = CanalSet union {'Primeiro','Ultimo'};
 	num X{CanSet} init 0;
-	for{can in CanSet: can not in {'Primeiro','Ultimo'}}
+	str status{CanSet};
+	for{can in CanSet: can not in {'Primeiro','Ultimo'}} do;
 		X[can] = xX[can];
+		status[can] = xstatus[can];
+	end;
 	X['Ultimo'] = max{can in CanSet}X[can]+1;
+	status['Primeiro']='';
+	status['Ultimo']='';
+
 	set<num,num,str> AlocaCanalSet = setof{<cv,mat,a,mod> in ProdutoModSet, can in CanSet}<cv,mat,can>;
 	var varAloca{AlocaCanalSet} binary;
 
@@ -285,6 +292,9 @@ proc optmodel printlevel=0;
 	str nextCan{CanSet} init '';
 	set<str> redCanSet;
 
+	/* Não usar canais indispoíveis*/
+	con Indisp{<cv,mat,can> in AlocaCanalSet: status[can]='INDISPONÍVEL'}:
+		varAloca[cv,mat,can] = 0;
 	/* Produtos iguais ficam lado a lado*/
 	set<num,num> cvReplSet = setof{<cv,mat,a,mod> in ProdutoModSet: mod=Modulo and a=Area and ncanais[cv,mat,a,mod] > 1}<cv,mat>;
 	var varBuracoCV{cvReplSet,redCanSet} binary;
@@ -293,7 +303,7 @@ proc optmodel printlevel=0;
 	con buracoCV_minus{<cv,mat> in cvReplSet, can in redCanSet}:
 		varBuracoCV[cv,mat,can] >= varAloca[cv,mat,nextCan[can]]-varAloca[cv,mat,can];
 	con umBuracoCV{<cv,mat> in cvReplSet}:
-		sum{can in redCanSet} varBuracoCV[cv,mat,can] <= 2;
+		sum{can in redCanSet} varBuracoCV[cv,mat,can] <= 4;
 
 	/* PRODUTOS SIMILARES*/
 	con simLadoCon{gp in GrupoSet, cv1 in CVSimilarSet[(gp)], cv2 in CVSimilarSet[(gp)], 
@@ -319,11 +329,11 @@ proc optmodel printlevel=0;
 	redCanSet = setof{can in CanSet: nextCan[can] ~= ''} <can>;
 	if restr_similar[Area] = 1 then do;
 		restore simLadoCon;
-		solve with milp/ maxtime=120;
+		solve with milp/ maxtime=220;
 	end;
 	else do;
 		drop simLadoCon;
-		solve with milp/ maxtime=30;
+		solve with milp/ maxtime=130;
 	end;
 	print Modulo (scan(symget("_OROPTMODEL_"),3));
 	for{<cv,mat,can> in AlocaCanalSet} do;

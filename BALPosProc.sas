@@ -1,3 +1,49 @@
+%macro corrige100(CD);
+PROC SQL;
+   CREATE TABLE WORK.DEM_100_00 AS 
+   SELECT t1.AREA, 
+          t1.COD_VENDA, 
+          t1.MATERIAL, 
+          t1.descricao, 
+          t1.DEMANDA_PERC_VENDA, 
+          /* COUNT_of_CANAL */
+            (COUNT(t1.CANAL)) AS COUNT_of_CANAL
+      FROM WRSTEMP.BLS5_NOVO_MAPA_&CD. t1
+      GROUP BY t1.AREA,
+               t1.COD_VENDA,
+               t1.MATERIAL,
+               t1.descricao,
+               t1.DEMANDA_PERC_VENDA;
+QUIT;
+PROC SQL;
+	CREATE TABLE WORK.DEM_100_01 AS 
+		SELECT t1.COD_VENDA, 
+			t1.MATERIAL, 
+			(t1.DEMANDA_PERC_VENDA / t1.COUNT_of_CANAL) FORMAT=PERCENT8.2 AS DEMANDA_100,
+			t1.COUNT_of_CANAL AS CANAL_CNT
+		FROM WORK.DEM_100_00 t1;
+QUIT;
+DATA BLS5_NOVO_MAPA_&CD.;
+	SET WRSTEMP.BLS5_NOVO_MAPA_&CD.;
+RUN;
+PROC SQL;
+   CREATE TABLE WRSTEMP.BLS5_NOVO_MAPA_&CD. AS 
+   SELECT t1.AREA, 
+          t1.MODULO, 
+          t1.CANAL, 
+          t1.CLASSIFICACAO, 
+          t1.COD_VENDA, 
+          t1.MATERIAL, 
+          t1.descricao, 
+          t1.DEMANDA_PERC_VENDA, 
+          t2.DEMANDA_100 AS DEMANDA_PERC_CANAL, 
+          t1.DEMANDA_VENDA, 
+          t2.CANAL_CNT AS NCANAIS
+      FROM WRSTEMP.BLS5_NOVO_MAPA_&CD. t1, WORK.DEM_100_01 t2
+      WHERE (t1.COD_VENDA = t2.COD_VENDA AND t1.MATERIAL = t2.MATERIAL);
+QUIT;
+%mend corrige100;
+
 %macro posProc(CD);
 /* Fazer novo mapa da linha ==> demanda soma 100%*/
 /* Robô-Pick e SCS não têm módulo*/
@@ -93,7 +139,7 @@ PROC SQL;
           t1.descricao, 
           t1.DEMANDA_VENDA AS DEMANDA_PERC_VENDA, 
           /* DEMANDA_CANAL */
-            (t1.DEMANDA_VENDA / t2.mat_cnt) AS DEMANDA_PERC_CANAL,
+            (t1.DEMANDA_VENDA / SUM(t1.DEMANDA_VENDA)) AS DEMANDA_PERC_CANAL,
 		  t3.DEMANDA AS DEMANDA_VENDA,
 		  t2.MAT_CNT AS NCANAIS
       FROM WORK.MAPA_03 t1
@@ -101,6 +147,8 @@ PROC SQL;
            INNER JOIN WORK.PRODUTOS t3 ON (t1.COD_VENDA = t3.COD_VENDA and t1.MATERIAL=t3.MATERIAL)
 		ORDER BY AREA,MODULO,CANAL;
 QUIT;
+/*Reconstroi DEMANDA_PERC_CANAL E NCANAIS*/
+%corrige100(&CD)
 
 /* Agora as movimentações*/
 PROC SQL;

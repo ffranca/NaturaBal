@@ -15,8 +15,8 @@
 	   CREATE TABLE WORK.MAT_ALOC AS 
 	   SELECT t1.COD_VENDA, 
 	          t1.MATERIAL, 
-	          /* MAX_of_REPL */
-	            (MAX(t3.repl * t3.cardMod)) AS MAX_of_REPL
+	          /* MIN_of_REPL */
+	            (MIN(t3.repl * t3.cardMod)) AS MIN_of_REPL
 	      FROM WRSTEMP.BLS1_PRODUTOS_&cod_cd. t1
 	           LEFT JOIN WORK.MAT_FIXO t2 ON (t1.MATERIAL = t2.MATERIAL)
 	           INNER JOIN WRSTEMP.BLS1_REPLICACAO_&cod_cd. t3 ON (t1.COD_VENDA = t3.COD_VENDA) AND (t1.MATERIAL = t3.MATERIAL)
@@ -27,8 +27,8 @@
 /* canais necessários*/
 	PROC SQL;
 	   CREATE TABLE WORK.canal_nesc AS 
-	   SELECT /* SUM_of_MAX_of_REPL */
-	            (SUM(t1.MAX_of_REPL)) AS SUM_of_MAX_of_REPL
+	   SELECT /* SUM_of_MIN_of_REPL */
+	            (SUM(t1.MIN_of_REPL)) AS SUM_of_MIN_of_REPL
 	      FROM WORK.MAT_ALOC t1;
 	QUIT;
 /* Canais disponíveis*/
@@ -44,11 +44,11 @@
 	PROC SQL;
 		create table erro_area as select distinct
 			'ERRO' AS TIPO,
-			"Canais necessários = " || trim(put(t1.SUM_of_MAX_of_REPL,4.)) ||
+			"Canais necessários = " || trim(put(t1.SUM_of_MIN_of_REPL,4.)) ||
 			" Canais disponíveis = " || trim(put(t2.SUM_of_CAPACIDADE,4.)) || "." AS DESCRICAO,
 			'BLS1_PRODUTOS' AS TABELA1,
 			'RESTRICAO_AREA' AS TABELA2
-	      FROM WORK.canal_nesc t1, WORK.canal_disp t2 WHERE t1.SUM_of_MAX_of_REPL>t2.SUM_of_CAPACIDADE;
+	      FROM WORK.canal_nesc t1, WORK.canal_disp t2 WHERE t1.SUM_of_MIN_of_REPL>t2.SUM_of_CAPACIDADE;
 	QUIT;
 	PROC SQL noprint;
 		select count(*) into :erros from erro_area;
@@ -88,10 +88,158 @@ quit;
 		restore trocas;
 	end;
 %mend AA_maxPaper;
+%macro logTrocas(cd);
+/* movimentos por descadastramento (descontinuados)*/
+title 'Número de descadastramentos nescessários (para detalhe tabela BLS1_DESCONTINUADOS)';
+proc sql;
+	select count(*) into :aa_desc from wrstemp.bls1_descontinuados_&cd;
+quit;
+/* movimentos por cadastramento de novos skus (lançamentos)*/
+title 'Número de cadastramentos nescessários (para detalhe tabela BLS1_LANCAMENTOS)';
+proc sql;
+	select count(*) into :aa_novos from wrstemp.bls1_lancamentos_&cd;
+quit;
+/* movimentos por abertura/fechamento de canais*/
+/* Número de canais para cada material/área no mapa atual*/
+PROC SQL;
+   CREATE TABLE WORK.mov_abre_canal AS 
+   SELECT t1.AREA, 
+          t1.MATERIAL, 
+          /* COUNT_of_CANAL */
+            (COUNT(t1.CANAL)) AS COUNT_of_CANAL
+      FROM WRSTEMP.BLE_MAPA_&cd t1, WRSTEMP.BLE_ESTRUTURA_CD_&cd t2
+      WHERE (t1.AREA = t2.AREA AND t1.CANAL = t2.CANAL) AND t2.ESTACAO = 1
+      GROUP BY t1.AREA,
+               t1.MATERIAL;
+QUIT;
+PROC SQL;
+   CREATE TABLE WORK.MOV_ABRE_CANAL_1 AS 
+   SELECT t1.AREA, 
+          t1.MATERIAL, 
+          t1.COUNT_of_CANAL, 
+          /* abre_count */
+            (t2.repl * t2.cardMod) AS abre_count, 
+          /* canal_dif */
+            (abs((t2.repl * t2.cardMod) - t1.COUNT_of_CANAL)) AS canal_dif
+      FROM WORK.MOV_ABRE_CANAL t1, WRSTEMP.BLS1_REPLICACAO_&cd t2
+      WHERE (t1.MATERIAL = t2.MATERIAL AND t1.AREA = t2.AREA);
+QUIT;
+title 'Número de movimentações nescessárias para abertura e fechamento de canais';
+proc sql;
+	select area, sum(canal_dif) as movimentacoes from WORK.MOV_ABRE_CANAL_1 group by area;
+quit;
+%mend logTrocas;
+%macro ajustaRepl;
+/* Seleciona para o AFRAME quais são as movimentações por replicação escolhidas*/
+/*Materiais AFRAME*/
+PROC SQL;
+   CREATE TABLE WORK.RESTR_REPL_00 AS 
+   SELECT distinct 
+		t1.AREA, 
+        t1.MATERIAL
+      FROM WRSTEMP.BLS2_SOLUCAO_AREA t1
+      WHERE t1.AREA in ('AFRAME','AFRAME MAQ');
+QUIT;
+/* Calcula número atual de canais do material na linha*/
+PROC SQL;
+	CREATE TABLE WORK.RESTR_REPL_01A AS 
+		SELECT t1.AREA, 
+			t1.MATERIAL,
+			t3.MODULO,	 
+			(COUNT(t3.CANAL)) AS nCanAtual
+		FROM RESTR_REPL_00 t1
+			LEFT JOIN WRSTEMP.BLE_MAPA_&cd. t2 ON (t1.MATERIAL=t2.MATERIAL AND t1.AREA=t2.AREA)
+			LEFT JOIN WRSTEMP.BLE_ESTRUTURA_CD_&cd. t3 ON (t1.AREA = t3.AREA AND t2.CANAL = t3.CANAL)
+		WHERE t3.ESTACAO = 1
+		GROUP BY t1.AREA,t1.MATERIAL,t3.MODULO
+		ORDER BY t1.MATERIAL;
+QUIT;
+
+PROC SQL;
+   CREATE TABLE WORK.RESTR_REPL_01B AS 
+   SELECT t1.AREA, 
+          t1.MATERIAL, 
+          /* COUNT_of_MODULO */
+            (COUNT(t1.MODULO)) AS cardModAtual, 
+          /* MAX_of_nCanAtual */
+            (MAX(t1.nCanAtual)) AS replAtual
+      FROM WORK.RESTR_REPL_01A t1
+      GROUP BY t1.AREA,
+               t1.MATERIAL;
+QUIT;
+
+/* Calcula número de movimentações por replicação*/
+PROC SQL;
+	CREATE TABLE WORK.RESTR_REPL_02 AS 
+		SELECT t1.COD_VENDA, 
+			t1.MATERIAL, 
+			t1.AREA, 
+			t1.descricao, 
+			t1.demanda, 
+			t1.comprimento, 
+			t1.altura, 
+			t1.largura, 
+			t1.volume, 
+			t1.trocaArea, 
+			(COALESCE(t2.cardModAtual*t2.replAtual,0)) AS COUNT_OF_CANAL,
+			t2.cardModAtual,
+			t2.replAtual,
+			t3.repl, 
+			t3.cardMod,
+			(t3.repl*t3.cardMod) - COALESCE(t2.cardModAtual*t2.replAtual,0) AS NMOV
+		FROM WRSTEMP.BLS2_SOL_MAPA3 t1
+			LEFT JOIN WORK.RESTR_REPL_01B t2 ON (t1.AREA = t2.AREA) AND (t1.MATERIAL = t2.MATERIAL)
+			INNER JOIN WRSTEMP.BLS1_REPLICACAO_&cd. t3 ON (t1.MATERIAL = t3.MATERIAL) AND (t1.AREA = t3.AREA)
+		WHERE t1.AREA IN('AFRAME','AFRAME MAQ')
+		ORDER BY (CALCULATED NMOV) DESC;
+QUIT;
+/* Limita as movimentações*/
+DATA RESTR_REPL_03;
+	SET RESTR_REPL_02;
+	RETAIN ACC_MOV 0;
+
+	fixa_repl = 0;
+	if ACC_MOV + abs(NMOV) < &max_trocas_repl_aframe. and NMOV ~= 0 then ACC_MOV + abs(NMOV);
+	/* A partir deste ponto modifica replicação*/
+	else do;
+		if trocaArea = 1 or COUNT_OF_CANAL=0 then do;
+			repl = 1;
+			cardMod = 1;
+		end;
+		else do;
+			cardMod = cardModAtual;
+			repl = replAtual;
+			fixa_repl = 1;
+		end;
+	end;
+RUN;
+/* Atualiza a tabela de replicações. Altera algumas replicações e acrescenta o campo fixa replicação que impede replicações*/
+PROC SQL;
+   CREATE TABLE WORK.BLS1_REPLICACAO AS 
+   SELECT t1.COD_VENDA, 
+          t1.MATERIAL, 
+          t1.AREA, 
+          t1.reposicao,
+		  coalesce(t2.fixa_repl,0) as fixa_repl, 
+          /* repl */
+            (coalesce(t2.repl,t1.repl)) AS repl, 
+          /* cardMod */
+            (coalesce(t2.cardMod,t1.cardMod)) AS cardMod
+      FROM WRSTEMP.BLS1_REPLICACAO_&cd. t1
+           LEFT JOIN WORK.RESTR_REPL_03 t2 ON (t1.MATERIAL = t2.MATERIAL) AND (t1.AREA = t2.AREA)
+      ORDER BY t1.AREA,
+               cardMod DESC,
+               repl DESC;
+QUIT;
+data WRSTEMP.BLS1_REPLICACAO_&cd.;
+	set BLS1_REPLICACAO;
+run;
+%mend ajustaRepl;
 
 %macro AlocaArea(cd);
 %logArea(&cd.)
 %initPaper(&cd.)
+%logTrocas(&cd.)
 %if &erros. = 0 %then %do;
 	proc optmodel printlevel=0;
 		/*Lê DESCONTINUADOS_&cd*/
@@ -123,7 +271,7 @@ quit;
 	/*	set<str,num> IncompSet;*/
 	/*	read data WRSTEMP.BLS1_INCOMPATIBILIDADE_&cd into IncompSet=[AREA_INCOMPATIVEL COD_VENDA]; */
 		set XIncompSet;
-		set<str> IncompColSet = / 'Robô-Pick' 'AFRAME' 'AFRAME MAQ' /;
+		set<str> IncompColSet = / 'ROBÔ-PICK' 'AFRAME' 'AFRAME MAQ' /;
 		str incompat{XIncompSet,IncompColSet};
 		read data WRSTEMP.BLE_INCOMPATIBILIDADE_&cd into XIncompSet=[COD_VENDA]
 				{a in IncompColSet} <incompat[cod_venda,a]=col(a)>; 
@@ -140,7 +288,7 @@ quit;
 		set<str> CanalSet;
 		str areaCanal{CanalSet};
 		str modCanal{CanalSet};
-		read data WRSTEMP.BLE_ESTRUTURA_CD_&cd into CanalSet=[CANAL]
+		read data WRSTEMP.BLE_ESTRUTURA_CD_&cd(where=(STATUS~='INDISPONÍVEL' AND ESTACAO=1)) into CanalSet=[CANAL]
 			areaCanal=AREA modCanal=MODULO; 
 		/*Lê REPLICACAO  de canais*/
 		set<num,num,str> ReplSet;
@@ -178,6 +326,10 @@ quit;
 		/* Capacidade */
 		con cap{a in AreaSet: fixaArea[a]=0}:
 			sum{<cv,mat> in ProdutoSet} varAloca[cv,mat,a]*cardMod[cv,mat,a]*repl[cv,mat,a] <= capArea[a];
+		/* Não aloca na área que não possui módulos suficientes*/
+		num nModArea{a in AreaSet} = card(setof{can in CanalSet: AreaCanal[can]=a}<modCanal[can]>);
+		con ModMax{a in AreaSet, <cv,mat> in ProdutoSet: fixaArea[a]=0 and cardMod[cv,mat,a]>nModArea[a]}:
+			varAloca[cv,mat,a] = 0;
 		/* Incompatibilidade */
 		con incomp{<cv,mat,a> in AlocaAreaSet: <cv,a> in IncompSet and <cv,mat,a> not in areaFixaSet}:
 			varAloca[cv,mat,a] = 0;
@@ -186,46 +338,57 @@ quit;
 		/* Número de trocas*/
 		num trocaProdMult = sum{<cv,mat> in ProdutoSet: cardProd[cv,mat] > 1} (cardProd[cv,mat]-1);
 		var varTrocas >= 0 <= &max_troca_area + trocaProdMult;
+/*		var varTrocas >= 0 <= &max_troca_area;*/
 		con trocas:
 			varTrocas = sum{<cv,mat,a> in ProdutoAreaSet: <cv,mat> in ProdutoSet and <cv,a> not in IncompSet} (1-varAloca[cv,mat,a]); 
-		/* Fazer ocupação máxima PAPER*/
-		%AA_maxPAPER
-		/* Fazer ocupação máxima do AFRAME e AFRAME MAQ*/
-		drop trocas;
-		max obj1 = sum{<cv,mat,a> in AlocaAreaSet: a in {'AFRAME','AFRAME MAQ'}} varAloca[cv,mat,a];
-		solve;
 
+		/* Restrição PAPER*/
+		set<num,num> MatPaperSet;
+		read data mat_paper into MatPaperSet=[COD_VENDA MATERIAL];
+		set PaperSet = /'PAPER DISPENSER' 'PBL AAG' 'PBL AG' 'PBL MG' 'PBL BG'/;
+		/* ZPRE só no paper ou pbl*/
+		con zpre_paper{<cv,mat,a> in AlocaAreaSet: <cv,mat> in MatPaperSet and a not in PaperSet}:
+			varAloca[cv,mat,a] = 0;
+		/* No paper só zpre*/
+		con paper_zpre{<cv,mat,a> in AlocaAreaSet: <cv,mat> not in MatPaperSet and a in {'PAPER DISPENSER'}}:
+			varAloca[cv,mat,a] = 0;
+
+		/* Objetivo para áreas*/
 		num objDemArea{AreaSet} init 0;
-		num prob;
-		if card({'AFRAME'} inter AreaSet) = 1 then do;
-			for{i in 150..500} do;
-				prob = CDF('BINOMIAL',&max_itens_aframe.,i/1000,&prev_itens_volume.);
-				objDemArea['AFRAME'] = (i-1)/1000*replArea['AFRAME'];
-				if prob < .99 then stop;
-			end;
-			objDemArea['AFRAME'] = sum{<cv,mat,'AFRAME'> in AlocaAreaSet} varAloca[cv,mat,'AFRAME']*demanda[cv,mat];
-		end;
-		if card({'AFRAME MAQ'} inter AreaSet) = 1 then do;
-			for{i in 150..300} do;
-				prob = CDF('BINOMIAL',&max_itens_aframe_maq.,i/1000,&prev_itens_volume.);
-				objDemArea['AFRAME MAQ'] = (i-1)/1000*replArea['AFRAME MAQ'];
-				if prob < .95 then stop;
-			end;	
-			objDemArea['AFRAME MAQ'] = sum{<cv,mat,'AFRAME MAQ'> in AlocaAreaSet: varAloca[cv,mat,'AFRAME MAQ'] >0.1} demanda[cv,mat];
-		end;
-		/* Objetivo para outras áreas*/
+		num demanda_total = sum{<cv,mat> in ProdutoSet} demanda[cv,mat];
+		put demanda_total=;
 		set<str> objSet;
 		num objPerc{objSet};
 		read data WRSTEMP.BLE_OBJ_AREA_&cd. into objSet=[AREA] objPerc=objetivo;
-			
-		/* Divide a demanda restante para o PBL*/
-		num demanda_total = sum{<cv,mat> in ProdutoSet} demanda[cv,mat];
-		num demRestante = demanda_total - sum{a in {'AFRAME','AFRAME MAQ'}: a in AreaSet} objDemArea[a];
-		for{a in AreaSet: a not in {'AFRAME','AFRAME MAQ'}}
-			objDemArea[a] =objPerc[a]*demRestante;
+		
+		/* Divide a demanda de acordo com a demanada total*/
+		for{a in AreaSet}
+			objDemArea[a] =objPerc[a]*demanda_total;
 
 		/* FO ==> minimizar desvio da distribuição ideal*/
 		impvar ivCargaArea{a in AreaSet} = sum{<cv,mat,(a)> in AlocaAreaSet} varAloca[cv,mat,a]*demanda[cv,mat];
+
+		/* Paper e AFRAME não podem ultrapassar o objetivo*/
+		con maxObj{a in AreaSet: a in {'PAPER DISPENSER','AFRAME','AFRAME MAQ'}}: 
+			ivCargaArea[a] <= objPerc[a];
+		
+		max obj = sum{<cv,mat,a> in AlocaAreaSet: a in {'PAPER DISPENSER','AFRAME','AFRAME MAQ'}} ivCargaArea[a];
+		solve;
+		print 'Resultado Otimização 1 (Maximizar AFRAME e PAPER) ' _SOLUTION_STATUS_;
+		num objAreaIni{objSet};
+		for{a in AreaSet: a in {'PAPER DISPENSER','AFRAME','AFRAME MAQ'}} do;
+			objAreaIni[a] = ivCargaArea[a];
+		end;
+
+		con fixaObjMin{a in AreaSet: a in {'PAPER DISPENSER','AFRAME','AFRAME MAQ'}}:
+			ivCargaArea[a] >= objAreaIni[a]*0.9;
+
+		num demRestante = demanda_total - sum{a in {'PAPER DISPENSER','AFRAME','AFRAME MAQ'}: a in AreaSet} objDemArea[a];
+		for{a in AreaSet: a not in {'PAPER DISPENSER','AFRAME','AFRAME MAQ'}}
+			objDemArea[a] = objPerc[a]*demRestante;
+
+		impvar ivCarga{a in AreaSet} = ivCargaArea[a]/demanda_total;
+		impvar ivDesvio{a in AreaSet} = ivCarga[a]-objDemArea[a];
 		num pesoObj{AreaSet} init 1;
 		for{a in AreaSet} do;
 			if a in {'SCS','Robô-Pick'} then
@@ -233,7 +396,9 @@ quit;
 			if a = 'PBL BG' then 
 				pesoObj[a] = 2;
 		end;
-		var varDesvio{AreaSet} >=0;
+		var varDesvio{AreaSet};
+		con red{a in AreaSet}:
+			varDesvio[a] >= 0;
 		con desvioPlus{a in AreaSet}:
 			varDesvio[a] >= (ivCargaArea[a]-objDemArea[a])*pesoObj[a];
 		con desvioMinus{a in AreaSet}:
@@ -241,13 +406,14 @@ quit;
 		restore trocas;
 		min obj2=sum{a in AreaSet} varDesvio[a];
 
-		solve with milp/ maxtime=25;
+		solve with milp/ presolver=none primalin maxtime=25;
+		print 'Resultado Otimização 2 (Minimizar desvio do objetivo) ' _SOLUTION_STATUS_;
 
 		num demArea{AreaSet};
 		for{a in AreaSet} 
 			demArea[a] = sum{<cv,mat,(a)> in AlocaAreaSet} varAloca[cv,mat,a]*demanda100[cv,mat];
 		Title "Solução Inicial";
-		print objDemArea percent8.2 ivCargaArea percent8.2 varDesvio percent8.2;
+		print objPerc percent8.2 objDemArea percent8.2 ivCarga percent8.2 ivDesvio percent8.2;
 		set<str,str,num,num> TrocaSet init {};
 		for{<cv,mat> in ProdutoSet, org in AreaSet, dest in AreaSet: <cv,mat> not in LancaSet and <cv,mat,org> in ProdutoAreaSet} do;
 			if varAloca[cv,mat,org]=0 and varAloca[cv,mat,dest]>0.1 then
@@ -277,6 +443,7 @@ quit;
 		/* Objetivo maximizar produtos no SCS*/
 		max obj3 = sum{<cv,mat,a> in AlocaAreaSet: a = 'SCS'} varAloca[cv,mat,a];
 		solve with milp/ primalin maxtime=60;
+		print 'Resultado Otimização 3 (Melhorar alocação do SCS) ' _SOLUTION_STATUS_;
 
 		set<str,str,num,num> TrocaSetSCS init {};
 		for{<cv,mat> in ProdutoSet, org in AreaSet, dest in AreaSet: <cv,mat,org> in Sol2Set} do;
@@ -286,7 +453,7 @@ quit;
 		for{a in AreaSet} 
 			demArea[a] = sum{<cv,mat,(a)> in AlocaAreaSet} varAloca[cv,mat,a]*demanda100[cv,mat];
 		Title "Melhoria SCS";
-		print objDemArea percent8.2 ivCargaArea percent8.2 varDesvio percent8.2;
+		print objPerc percent8.2 objDemArea percent8.2 ivCarga percent8.2 ivDesvio percent8.2;
 		create data WRSTEMP.BLS2_sol_trocas2 from [AREA_ORG AREA_DEST COD_VENDA MATERIAL]={<org,dest,cv,mat> in TrocaSetSCS}
 			descricao[cv,mat] demanda[cv,mat] comprimento[cv,mat] altura[cv,mat] largura[cv,mat];
 		create data WRSTEMP.BLS2_sol_mapa2 from [COD_VENDA MATERIAL AREA]={<cv,mat,a> in AlocaAreaSet: varAloca[cv,mat,a]>0.1}
@@ -308,8 +475,9 @@ quit;
 		max obj4 = sum{<cv,mat,a> in AlocaAreaSet: a = 'MASS PICKING'} varAloca[cv,mat,a]*volume[cv,mat];
 		%if &preenche_mpick. = 1 %then %do;
 			solve with milp/ primalin maxtime=60;
+			print 'Resultado Otimização 4 (Melhorar alocação do Mass Picking) ' _SOLUTION_STATUS_;
 			Title "Melhoria Mass Picking";
-			print objDemArea percent8.2 ivCargaArea percent8.2 varDesvio percent8.2;
+			print objPerc percent8.2 objDemArea percent8.2 ivCarga percent8.2 ivDesvio percent8.2;
 		%end;
 		set<str,str,num,num> TrocaSetMass init {};
 		for{<cv,mat> in ProdutoSet, org in AreaSet, dest in AreaSet: <cv,mat,org> in Sol3Set} do;
@@ -336,11 +504,14 @@ quit;
 		num cntArea{AreaSet};
 		for{a in AreaSet}
 			cntArea[a] = sum{<cv,mat,(a)> in AlocaAreaSet} varAloca[cv,mat,a];
+		Title;
 		print cntArea capArea;
 
 	quit;
 	DATA WRSTEMP.BLS2_SOLUCAO_AREA;
 		SET WRSTEMP.BLS2_sol_mapa3;
 	RUN;
+	/*Ajusta replicções no AFRAME para respeitar o parâmetro max_trocas_repl_AFRAME*/
+	%ajustaRepl
 %end;
 %mend AlocaArea;
