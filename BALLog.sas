@@ -189,16 +189,36 @@
 		LEFT JOIN CADASTRO_MATERIAIS t2 ON(t1.COD_VENDA=t2.COD_VENDA AND t1.MATERIAL=t2.MATERIAL)
 		WHERE t2.MATERIAL IS MISSING and cod_cd = &cod_cd.;
 	QUIT;	
-/* Qtd de canais em RESTRICAO_AREA*/
-	PROC SQL;
-	   CREATE TABLE WORK.CAP_AREA AS 
-	   SELECT t1.AREA, 
-	          /* COUNT_of_CANAL */
-	            (COUNT(t1.CANAL)) AS COUNT_of_CANAL
-	      FROM WRSTEMP.BLE_ESTRUTURA_CD_&cod_cd. t1
-	      WHERE t1.ESTACAO = 1 AND t1.STATUS NOT = 'INDISPONÍVEL'
-	      GROUP BY t1.AREA;
-	QUIT;
+	/* Qtd de canais em RESTRICAO_AREA*/
+	proc sql noprint;
+		select count(memname) into :existe
+			from dictionary.tables
+			where libname="WRSTEMP" and memname="BLE_ESTRUTURA_AFRAME_&cod_cd.";
+	quit;	
+	%if &existe. = 1 %then %do;
+		PROC SQL;
+			CREATE TABLE WORK.CAP_AREA AS 
+				SELECT t1.AREA,
+					CASE
+						WHEN t1.AREA IN ('AFRAME','AFRAME MAQ') THEN COUNT(DISTINCT(t2.CANAL_VIRTUAL))
+						ELSE (COUNT(t1.CANAL)) 
+					END AS COUNT_of_CANAL
+				FROM WRSTEMP.BLE_ESTRUTURA_CD_&cod_cd. t1
+				LEFT JOIN WRSTEMP.BLE_ESTRUTURA_AFRAME_&cod_cd. t2 ON t1.CANAL=t2.CANAL
+					WHERE t1.ESTACAO = 1 AND t1.STATUS = '' AND t2.STATUS NOT = 'INDISPONÍVEL'
+					GROUP BY t1.AREA;
+		QUIT;
+	%end; %else %do;
+		PROC SQL;
+		   CREATE TABLE WORK.CAP_AREA AS 
+		   SELECT t1.AREA, 
+		          /* COUNT_of_CANAL */
+		            (COUNT(t1.CANAL)) AS COUNT_of_CANAL
+		      FROM WRSTEMP.BLE_ESTRUTURA_CD_&cod_cd. t1
+		      WHERE t1.ESTACAO = 1 AND t1.STATUS NOT = 'INDISPONÍVEL'
+		      GROUP BY t1.AREA;
+		QUIT;
+	%end;
 	PROC SQL;
 	   CREATE TABLE WORK.ERR_CAP_AREA AS 
 	   SELECT t1.AREA, 
@@ -336,11 +356,10 @@
 	PROC SQL;
 	   CREATE TABLE WORK.PRODUTO_AREA_INCOMPATIVEL AS 
 	   SELECT DISTINCT t1.COD_VENDA, 
-	          t1.MATERIAL, 
 	          t1.DESCRICAO, 
 	          t1.AREA
 	      FROM WRSTEMP.BLS1_PRODUTO_AREA_&cod_cd. t1, WRSTEMP.BLE_INCOMPATIBILIDADE_&cod_cd. t2
-	      WHERE (t1.COD_VENDA = t2.COD_VENDA AND t1.MATERIAL = t2.MATERIAL AND (
+	      WHERE (t1.COD_VENDA = t2.COD_VENDA AND (
 			(t1.AREA = 'Robô-Pick' AND t2.'ROBÔ-PICK'n='x') or
 			(t1.AREA = 'AFRAME' AND t2.AFRAME='x') or
 			(t1.AREA = 'AFRAME MAQ' AND t2.'AFRAME MAQ'n='x')));
@@ -348,7 +367,7 @@
 	PROC SQL;
 		INSERT INTO WRSTEMP.BLS1_LOG SELECT DISTINCT
 			'AVISO' AS TIPO,
-			"Produto '" || compress(put(t1.MATERIAL,8.)) || "-" || trim(t1.DESCRICAO) || 
+			"Produto '" || compress(put(t1.cod_venda,8.)) || "-" || trim(t1.DESCRICAO) || 
 			"' alocado em área(" || trim(t1.AREA) || ") incompatível. Movimentação não será contabilizada em trocas." AS DESCRICAO,
 			'BLE_MAPA' AS TABELA1,
 			'INCOMPATIBILIDADE' AS TABELA2
@@ -358,24 +377,25 @@
 	PROC SQL;
 	   CREATE TABLE WORK.PRODUTO_PBL_INCOMPATIVEL AS 
 	   SELECT t3.COD_VENDA, 
-	          t3.MATERIAL, 
 	          t3.'DESCRIÇÃO MATERIAL'n as DESCRICAO, 
 	          t1.CANAL, 
 	          t3.NIVEL_PBL
-	      FROM WRSTEMP.BLE_MAPA_&cod_cd. t1, WRSTEMP.BLE_ESTRUTURA_CD_&cod_cd. t2, WRSTEMP.BLE_INCOMPATIBILIDADE_&cod_cd. t3
-	      WHERE (t1.AREA = t2.AREA AND t1.CANAL = t2.CANAL AND (t2.ESTACAO=1) AND t1.MATERIAL = t3.MATERIAL AND t2.Y = 
-	           t3.NIVEL_PBL and t3.NIVEL_PBL is not missing);
+	      FROM WRSTEMP.BLE_MAPA_&cod_cd. t1, WRSTEMP.BLE_ESTRUTURA_CD_&cod_cd. t2, WRSTEMP.BLE_INCOMPATIBILIDADE_&cod_cd. t3,
+		  	WRSTEMP.BLS1_PRODUTO_AREA_&cod_cd. t4
+	      WHERE (t1.AREA = t2.AREA AND t1.CANAL = t2.CANAL AND (t2.ESTACAO=1) AND t1.MATERIAL=t4.MATERIAL AND 
+			t4.COD_VENDA=t3.COD_VENDA AND t2.Y = t3.NIVEL_PBL and t3.NIVEL_PBL is not missing);
 	QUIT;
 	PROC SQL;
 		INSERT INTO WRSTEMP.BLS1_LOG SELECT DISTINCT
 			'AVISO' AS TIPO,
-			"Produto '" || compress(put(t1.MATERIAL,8.)) || "-" || trim(t1.DESCRICAO) || 
+			"Produto '" || compress(put(t1.cod_venda,8.)) || "-" || trim(t1.DESCRICAO) || 
 			"' alocado no PBL em nível(" || put(t1.NIVEL_PBL,1.) || ") incompatível. Movimentação não será contabilizada em trocas." AS DESCRICAO,
 			'BLE_MAPA' AS TABELA1,
 			'INCOMPATIBILIDADE' AS TABELA2
 		FROM PRODUTO_PBL_INCOMPATIVEL t1;
 	QUIT;	
 %mend LOG_incomp;
+
 %macro LOG_prev;
 	PROC SQL;
 		CREATE TABLE WORK.LOG_PREV_00 AS 
@@ -408,4 +428,3 @@
 	run;
 %end;
 %mend LOG_prev;
-
