@@ -337,8 +337,7 @@
 			Largura NUM FORMAT=BEST12.,
 			'Unidade de medida_2'n CHAR(2),
 			Altura NUM FORMAT=BEST12.,
-			'Unidade de medida_3'n CHAR(2),
-			'Qtd.para número de notas EM'n NUM FORMAT=BEST12.);
+			'Unidade de medida_3'n CHAR(2));
 	quit;
 	%PRP_verificaTabela(SIMULA,BLE_CADASTRO_MATERIAIS,erro,CAD_MAT)
 	%if &erro = 0 %then %do;
@@ -347,16 +346,21 @@
 		   SELECT t1.Material AS MATERIAL, 
 		          t1.'Descrição do material'n AS DESCRICAO, 
 		          t1.'Código de Venda'n AS COD_VENDA, 
+/*		          t1.SM, */
+	/*	          t1.'Peso líquido'n AS PESO_LIQ, */
+	/*	          t1.UP_2, */
 		          t1.Volume AS VOLUME, 
 		          t1.UVl, 
+	/*	          t1.'Code EAN/UPC'n, */
+	/*	          t1.UVl_2, */
 		          t1.TMat, 
+	/*	          t1.UP_3, */
 		          t1.'Cmpr.'n AS COMPRIMENTO, 
 		          t1.'Unidade de medida'n AS UMC, 
 		          t1.Largura AS LARGURA, 
 		          t1.'Unidade de medida_2'n AS UML, 
 		          t1.Altura AS ALTURA, 
-		          t1.'Unidade de medida_3'n AS UMA,
-				  t1.'Qtd.para número de notas EM'n AS ITENS_CAIXA
+		          t1.'Unidade de medida_3'n AS UMA
 		      FROM SIMULA.BLE_CADASTRO_MATERIAIS t1;
 		QUIT;
 	%end;
@@ -482,7 +486,12 @@
 	proc sql noprint;
 		create table INCOMPATIBILIDADE (
 			COD_VENDA NUM FORMAT=BEST12.,
+			MATERIAL NUM FORMAT=BEST12.,
 			'DESCRIÇÃO MATERIAL'n CHAR(41),
+			COMPR NUM FORMAT=BEST12.,
+			LARGURA NUM FORMAT=BEST12.,
+			ALTURA NUM FORMAT=BEST12.,
+			'PESO BRUTO'n NUM FORMAT=BEST12.,
 			'ROBÔ-PICK'n CHAR(14),			
 			AFRAME CHAR(14),			
 			'AFRAME MAQ'n CHAR(14),
@@ -703,22 +712,6 @@
 	QUIT;
 /* Trata PAPER DISPENSER*/
 	PROC SQL;
-   CREATE TABLE WORK.PREV_PAPER_001 AS 
-   SELECT t1.COD_CD, 
-          t1.ANO, 
-          t1.CICLO, 
-          t1.DATA, 
-          /* SUM_of_SUM_of_VOLUME_CAPT */
-            (SUM(t1.SUM_of_SUM_of_VOLUME_CAPTADO)) FORMAT=BEST12. AS SUM_of_SUM_of_VOLUME_CAPTADO
-      FROM WORK.PREV_PERC_01 t1
-      GROUP BY t1.COD_CD,
-               t1.ANO,
-               t1.CICLO,
-               t1.DATA;
-	QUIT;
-	
-
-	PROC SQL;
 	   CREATE TABLE WORK.PREV_PAPER_01 AS 
 	   SELECT t1.COD_CD, 
 	          t1.ANO, 
@@ -726,12 +719,11 @@
 	          t1.DATA, 
 	          /* DEMANDA_PERC */
 	          COALESCE(t1.SUM_of_SUM_of_VOLUME_CAPTADO / sum(t1.SUM_of_SUM_of_VOLUME_CAPTADO),0) FORMAT=PERCENT8.2 AS DEMANDA_PERC
-	      FROM WORK.PREV_PAPER_001 t1
+	      FROM WORK.PREV_PERC_01 t1
 	      GROUP BY t1.COD_CD,
 	               t1.ANO,
 	               t1.CICLO;
 	QUIT;
-
 	PROC SQL;
 	   CREATE TABLE WORK.PREV_PAPER_02 AS 
 	   SELECT t1.COD_CD, 
@@ -776,52 +768,9 @@
 			LEFT JOIN CADASTRO_MATERIAIS t2 ON t1.COD_VENDA = t2.COD_VENDA AND t1.MATERIAL=t2.MATERIAL;
 	QUIT;
 /* Junta com demanda normal*/
-
-	PROC SQL;
-	   CREATE TABLE WORK.PREV_PRD AS 
-	   SELECT t2.'Código de Venda'n AS COD_VENDA, 
-	          t1.MATERIAL, 
-	          t1.'Desc Material'n AS DESCRICAO, 
-	          t2.TMat, 
-	          t2.VOLUME, 
-	          t2.'Cmpr.'n AS COMPRIMENTO, 
-	          t2.'Unidade de medida'n AS UMC, 
-	          t2.Largura, 
-	          t2.'Unidade de medida_2'n AS UML, 
-	          t2.Altura, 
-	          t2.'Unidade de medida_3'n AS UMA, 
-	          t3.ESTOQUE, 
-	          t1.Unidades AS DEMANDA
-	      FROM WRSTEMP.BLE_PRD_&cd. t1, SIMULA.BLE_CADASTRO_MATERIAIS t2, WRSTEMP.BLE_ESTOQUE_&cd. t3
-	      WHERE (t1.Material = t2.Material AND t1.Material = t3.MATERIAL);
-	QUIT;
-
-
-	data PREV_PERC_07b1;
-		set PREV_PERC_07a PREV_PAPER_04 PREV_PRD;
+	data PREV_PERC_07b;
+		set PREV_PERC_07a PREV_PAPER_04;
 	run;
-
-	PROC SQL;
-	   CREATE TABLE WORK.PREV_PERC_07B AS 
-	   SELECT DISTINCT 
-			  t1.COD_VENDA, 
-	          t1.MATERIAL, 
-	          t1.DESCRICAO, 
-	          t1.TMat, 
-	          t1.VOLUME, 
-	          t1.COMPRIMENTO, 
-	          t1.UMC, 
-	          t1.LARGURA, 
-	          t1.UML, 
-	          t1.ALTURA, 
-	          t1.UMA, 
-	          sum(t1.ESTOQUE) as ESTOQUE, 
-	          /* DEMANDA */
-	            (SUM(t1.DEMANDA)) FORMAT=COMMA12. AS DEMANDA
-	      FROM WORK.PREV_PERC_07B1 t1
-	      GROUP BY t1.COD_VENDA,
-	               t1.MATERIAL;
-	QUIT;
 	/* Faz demanda percentual por cod_venda*/
 	PROC SQL;
 	   CREATE TABLE WORK.PREV_PERC_07c AS 
@@ -838,35 +787,16 @@
 	quit;
 	/* Verifica qual a regra 1-usa o material com o maior estoque 2-usa todos com estoque*/
 %if &regra_estoque = USA_MAT_MAIOR_ESTOQUE %then %do;
-	/*Verifica quais materiais já estão na linha*/
-	PROC SQL;
-		CREATE TABLE WORK.PREV_PERC_071 AS 
-			SELECT DISTINCT t1.*, 
-				(IFN(t2.MATERIAL~=.,1,0)) AS IS_NA_LINHA
-			FROM WORK.PREV_PERC_07 t1
-				LEFT JOIN WRSTEMP.BLE_MAPA_&cd. t2 ON (t1.MATERIAL = t2.MATERIAL);
-	QUIT;
-
-	proc sort data=prev_perc_071;
-		by COD_VENDA DESCENDING IS_NA_LINHA DESCENDING ESTOQUE;
+	proc sort data=prev_perc_07;
+		by COD_VENDA DESCENDING ESTOQUE;
 	quit;
-	data PREV_PERC_08a;
-		set PREV_PERC_071;
+	data PREV_PERC_08;
+		set PREV_PERC_07;
 		by COD_VENDA;
 
-
-		
+		DEMANDA_PERC_100 = DEMANDA_PERC;
 		if first.COD_VENDA then output;
-		drop demanda_perc;
 	run;
-	PROC SQL;
-	   CREATE TABLE WORK.PREV_PERC_08 AS 
-	   SELECT t1.*, 
-	          t1.DEMANDA/(SUM(t1.DEMANDA)) AS DEMANDA_PERC,
-	          t1.DEMANDA/(SUM(t1.DEMANDA)) AS DEMANDA_PERC_100
-	      FROM WORK.PREV_PERC_08a t1;
-	QUIT;
-
 %end;
 %else %do;
 	/* Log material com menos de 5% do estoque de cod_venda e tira da base*/
@@ -884,44 +814,63 @@
 /*	%LOG_InsereTabela(log_estoque_5perc)*/
 	Title ;
 	proc sql;
-		create table PREV_PERC_071(drop=demanda_perc) as
-			select distinct * from prev_perc_07
+		create table PREV_PERC_071 as
+			select * from prev_perc_07
 			where ESTOQUE_PERC > 0.05 or ESTOQUE_PERC is missing;
 	quit;
 	/* Refaz a demanda_perc para somar 100%*/
+	proc sql;
+		create table prev_perc_072 as
+			select cod_venda, count(*) as mat_cnt
+			from PREV_PERC_071
+			group by cod_venda;
+	quit;
 	PROC SQL;
 	   CREATE TABLE WORK.PREV_PERC_08 AS 
-	   SELECT t1.*, 
-	          t1.DEMANDA/(SUM(t1.DEMANDA)) AS DEMANDA_PERC,
-	          t1.DEMANDA/(SUM(t1.DEMANDA)) AS DEMANDA_PERC_100
-	      FROM WORK.PREV_PERC_071 t1;
+	   SELECT t1.COD_VENDA, 
+	          t1.MATERIAL, 
+	          t1.DESCRICAO, 
+	          t1.TMat, 
+	          t1.VOLUME, 
+	          t1.COMPRIMENTO, 
+	          t1.UMC, 
+	          t1.LARGURA, 
+	          t1.UML, 
+	          t1.ALTURA, 
+	          t1.UMA, 
+	          t1.ESTOQUE, 
+	          t1.DEMANDA, 
+	          t1.DEMANDA_PERC, 
+	          t1.ESTOQUE_PERC, 
+	          /* DEMANDA_PERC_100 */
+	            (t1.DEMANDA_PERC / t2.mat_cnt) AS DEMANDA_PERC_100
+	      FROM WORK.PREV_PERC_071 t1
+	           INNER JOIN WORK.PREV_PERC_072 t2 ON (t1.COD_VENDA = t2.COD_VENDA);
 	QUIT;
 %end;
 	/*Previsão Percentual Final*/
-PROC SQL;
-	CREATE TABLE WRSTEMP.BLS1_PRODUTOS_&cd AS 
-		SELECT t1.COD_VENDA, 
-			t1.MATERIAL, 
-			t1.DESCRICAO, 
-			t1.TMAT, 
-			t1.VOLUME, 
-			t1.COMPRIMENTO, 
-			t1.UMC, 
-			t1.LARGURA, 
-			t1.UML, 
-			t1.ALTURA, 
-			t1.UMA,
-			IFN(t2.ITENS_CAIXA=1,50,t2.ITENS_CAIXA) AS ITENS_CAIXA,
-			t1.ESTOQUE, 
-			t1.ESTOQUE_PERC format=percent8.2, 
-			t1.DEMANDA format=comma12., 
-			t1.DEMANDA_PERC format=percent8.2,
-			t1.DEMANDA_PERC_100 format=percent8.2
-		FROM WORK.PREV_PERC_08 t1
-			INNER JOIN CADASTRO_MATERIAIS t2 ON t1.MATERIAL=t2.MATERIAL;
-QUIT;
-/* Relatório de demanda tratada*/
-%PRP_rel_demanda
+	PROC SQL;
+	   CREATE TABLE WRSTEMP.BLS1_PRODUTOS_&cd AS 
+	   SELECT t1.COD_VENDA, 
+	          t1.MATERIAL, 
+	          t1.DESCRICAO, 
+	          t1.TMAT, 
+	          t1.VOLUME, 
+	          t1.COMPRIMENTO, 
+	          t1.UMC, 
+	          t1.LARGURA, 
+	          t1.UML, 
+	          t1.ALTURA, 
+	          t1.UMA, 
+	          t1.ESTOQUE, 
+	          t1.ESTOQUE_PERC format=percent8.2, 
+	          t1.DEMANDA format=comma12., 
+	          t1.DEMANDA_PERC format=percent8.2,
+	          t1.DEMANDA_PERC_100 format=percent8.2
+	      FROM WORK.PREV_PERC_08 t1;
+	QUIT;
+	/* Relatório de demanda tratada*/
+	%PRP_rel_demanda
 %mend PRP_previsaoPercentual;
 
 %macro PRP_PrevisaoDiaria(data_ini, data_fin, cd);
@@ -1382,9 +1331,8 @@ proc optmodel printlevel=0;
 	num largura{ProdutoSet};
 	num altura{ProdutoSet};
 	num volume{ProdutoSet};
-	num itens_caixa{ProdutoSet};
 	read data WRSTEMP.BLS1_PRODUTOS_&cd into ProdutoSet=[COD_VENDA MATERIAL] demanda=DEMANDA_PERC demanda100=DEMANDA_PERC_100
-		descricao comprimento largura altura volume itens_caixa;
+		descricao comprimento largura altura volume;
 	/*Lê DESCONTINUADOS_&cd*/
 	set<str,str,num,num> XDescSet;
 	read data WRSTEMP.BLS1_DESCONTINUADOS_&cd into XDescSet=[AREA CANAL COD_VENDA MATERIAL]; 
@@ -1410,6 +1358,7 @@ proc optmodel printlevel=0;
 	num repl{ProdutoAreaSet} init 1;
 	num cardMod{ProdutoAreaSet} init 1;
 	num reposicao{ProdutoAreaSet} init 1;
+	num alt, itens_coluna, dem;
 	for{<cv,mat,a> in ProdutoAreaSet} do;
 		for{<(a),fx> in AbreCanSet} do;
 			if demanda_ini[a,fx] ~=  0 or demanda_fim[a,fx] ~= 0 then do;
@@ -1422,7 +1371,12 @@ proc optmodel printlevel=0;
 			end;
 			else do;
 				/* Faixa por demanda AFRAME*/
-				reposicao[cv,mat,a] = demanda[cv,mat]*&produtividade./itens_caixa[cv,mat];
+				alt = min(altura[cv,mat],comprimento[cv,mat],largura[cv,mat]);
+				if alt ~= 0 then
+					itens_coluna = &alt_coluna_aframe./alt;
+				else itens_coluna = 5000;
+				dem = demanda[cv,mat]*&produtividade.;
+				reposicao[cv,mat,a] = dem/itens_coluna;
 				if reposicao_ini[a,fx] <= reposicao[cv,mat,a] <= reposicao_fim[a,fx] then do;
 					repl[cv,mat,a] = fxRepl[a,fx];
 					cardMod[cv,mat,a] = fxCardMod[a,fx];
@@ -1432,8 +1386,7 @@ proc optmodel printlevel=0;
 		end;
 	end;
 
-	create data WRSTEMP.BLS1_REPLICACAO_&cd from [COD_VENDA MATERIAL AREA]={<cv,mat,a> in ProdutoAreaSet}
-		demanda[cv,mat] repl cardMod reposicao;
+	create data WRSTEMP.BLS1_REPLICACAO_&cd from [COD_VENDA MATERIAL AREA]=ProdutoAreaSet repl cardMod reposicao;
 quit;
 %mend PRP_abertura_canais;
 %macro PRP_verificaParametros;
@@ -1496,6 +1449,7 @@ quit;
 		%LOG_incomp
 		/* Calcula abertura de canais*/
 		%PRP_abertura_canais(&cod_cd)
+
 		%if &erros ~= 0 %then %do;
 			Title "Erros nas entradas. Otimização não executada.";
 			%LOG_Show;
@@ -1506,5 +1460,5 @@ quit;
 			%LOG_Show;
 			Title;
 		%end;
-	%end;
+	%end;		
 %mend PRP_Main;
