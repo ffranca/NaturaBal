@@ -228,7 +228,7 @@ quit;
 		impvar ivCargaArea{a in AreaSet} = sum{<cv,mat,(a)> in AlocaAreaSet} varAloca[cv,mat,a]*demanda[cv,mat];
 		num pesoObj{AreaSet} init 1;
 		for{a in AreaSet} do;
-			if a in {'SCS','Robô-Pick'} then
+			if a in {'SCS','Robô-Pick','PFL'} then
 				pesoObj[a] = 3;
 			if a = 'PBL BG' then 
 				pesoObj[a] = 2;
