@@ -1,12 +1,12 @@
-libname SIMULA "F:\data\natura\balanceamento_compartilhado";
-libname WRSTEMP "F:\data\natura\balanceamento_compartilhado\&cod_cd";
+libname SIMULA "F:\data\natura\Balanceamento\balanceamento_compartilhado";
+libname WRSTEMP "F:\data\natura\Balanceamento\balanceamento_compartilhado\&cod_cd";
 /* Classe Main*/
 /*%let CLASS_PATH= C:\Users\Fabio\Google Drive\Projetos\Natura\Balanceamento\Programas\v1.01;*/
-%let CLASS_PATH=F:\data\natura\balanceamento_compartilhado\REPOSITORIO STP;
+%let CLASS_PATH=F:\data\natura\Balanceamento\balanceamento_compartilhado\REPOSITORIO STP;
 /*options mprint symbolgen mlogic;*/
-%include "&CLASS_PATH/BALLog_v1.04.sas";
-%include "&CLASS_PATH/BALPreProc_v1.04.sas";
-%include "&CLASS_PATH/BALAlocaArea_v1.04.sas";
+%include "&CLASS_PATH/BALLog_v1.04B.sas";
+%include "&CLASS_PATH/BALPreProc_v1.04B.sas";
+%include "&CLASS_PATH/BALAlocaArea_v1.04B.sas";
 %include "&CLASS_PATH/BALAlocaModulo_v1.04.sas";
 %include "&CLASS_PATH/BALAlocaCanal_v1.04.sas";
 %include "&CLASS_PATH/BALPosProc_v1.04.sas";
